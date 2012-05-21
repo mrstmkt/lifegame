@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="hello">Hello World, LifegameActivity!</string>
+    <string name="app_name">Lifegame wallpaper</string>
+    <string name="pref_title_color">Color</string>
+    <string name="fast">fast</string>
+    <string name="slow">slow</string>
+    <string name="reverse_checkbox">Reverse background color</string>
+    <string name="basecolor">Theme Color</string>
+
+</resources>
