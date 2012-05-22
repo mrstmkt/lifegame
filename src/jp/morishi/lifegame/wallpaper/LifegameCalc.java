@@ -1,5 +1,6 @@
 package jp.morishi.lifegame.wallpaper;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -22,8 +23,7 @@ import android.view.SurfaceHolder;
 
 
 public class LifegameCalc implements Runnable{
-	private int _prevCount;
-	private List<byte[]> _prevDataList;
+	private PreviousData _prevData;
 	private int _width;
 	private int _height;
 	private byte[] _data;
@@ -76,8 +76,7 @@ public class LifegameCalc implements Runnable{
 	public LifegameCalc(Context context, int width, int height, int pxSize, int interval, int baseColor,int speed,boolean reverse, Engine e)  {
 		this._engine = e;
 		this.context = context;
-		this._prevCount = 3;
-		this._prevDataList = new ArrayList<byte[]>();
+		this._prevData = new PreviousData(2, width, height);
 		this._width = width - (width % 8);
 		this._height = height;
 		this._pxSize = pxSize;
@@ -91,13 +90,17 @@ public class LifegameCalc implements Runnable{
 		this._reverse = reverse;
 		this.setConfigNow(false);
 		this._backPattern = new BackPattern(BackPattern.PLAIN, this._width, this._height);
-		loadThumbnailIds();
-		loadThumbnailBitmap();
 		setBaseColor(baseColor);
 		makeLinePath();
 		this.setInterval(interval);
 	}
 	private void loadThumbnailIds() {
+		if(this._thumnailIds != null) {
+			if(this._thumnailIds.size() > 0) {
+				this._thumnailIds.clear();
+			}
+			this._thumnailIds = null;
+		}
 		this._thumnailIds = new ArrayList<Long>();
 		ContentResolver cr = context.getContentResolver();
 		Cursor cursor = cr.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, new String[]{MediaStore.Images.Media._ID}, null, null, null);
@@ -142,6 +145,10 @@ public class LifegameCalc implements Runnable{
 	}
 	private void drawThumbnailBitmap(Canvas c) {
 		if(this._bitmapList == null || this._bitmapList.size() == 0) {
+			loadThumbnailIds();
+			loadThumbnailBitmap();
+		}
+		if(this._bitmapList == null || this._bitmapList.size() == 0) {
 			return;
 		}
 		int index = 0;
@@ -161,7 +168,7 @@ public class LifegameCalc implements Runnable{
 		}
 	}
 	public void recycleBitmapList() {
-		if(this._bitmapList != null){
+		if(this._bitmapList != null && this._bitmapList.size() > 0){
 			for(int i = 0; i < this._bitmapList.size(); i++) {
 				this._bitmapList.get(i).recycle();
 			}
@@ -180,10 +187,7 @@ public class LifegameCalc implements Runnable{
 		return _data;
 	}
 	public void pushPrevData(byte[] data) {
-		this._prevDataList.add(0, data);
-		if(this._prevDataList.size() > this._prevCount) {
-			this._prevDataList.remove(_prevDataList.size() - 1);
-		}
+		this._prevData.push(data);
 	}
 	public byte[] cloneData(byte[] data) {
 		if(data != null) {
@@ -194,33 +198,21 @@ public class LifegameCalc implements Runnable{
 		}
 	}
 	public void setData(byte[] data) {
-		byte[] prevData = this.cloneData(this._data);
-		if(prevData == null) {
-			return;
-		}
-		this.pushPrevData(prevData);
+		this.pushPrevData(this._data);
 		for(int i = 0; i < this._data.length && i < data.length; i++) {
 			this._data[i] = data[i];
 		}
 		setState(0);
 	}
 	public void setOrData(byte[] data) {
-		byte[] prevData = this.cloneData(this._data);
-		if(prevData == null) {
-			return;
-		}
-		this.pushPrevData(prevData);
+		this.pushPrevData(this._data);
 		for(int i = 0; i < this._data.length && i < data.length; i++) {
 			this._data[i] =(byte)( this._data[i] | data[i]);
 		}
 		setState(0);
 	}
 	public void setAndData(byte[] data) {
-		byte[] prevData = this.cloneData(this._data);
-		if(prevData == null) {
-			return;
-		}
-		this.pushPrevData(prevData);
+		this.pushPrevData(this._data);
 		for(int i = 0; i < this._data.length && i < data.length; i++) {
 			this._data[i] = (byte)(this._data[i] & data[i]);
 		}
@@ -228,13 +220,8 @@ public class LifegameCalc implements Runnable{
 	}
 	public void calc() {
 		synchronized (syncObj) {
-			byte[] prevData = cloneData(this._data);
-			if(prevData == null) {
-				return;
-			}
-			pushPrevData(prevData);
-			byte[] data = nextLifeArray(this._data, this._width, this._height);
-			this._data = data;
+			pushPrevData(this._data);
+			nextLifeArray(this._data, this._data, this._width, this._height);
 		}
 		draw();
 	}
@@ -249,10 +236,8 @@ public class LifegameCalc implements Runnable{
 			int pxSize = this._pxSize;
 			Paint paint = new Paint();
 			
-			byte[] prevData = null;
-			if(this._prevDataList.size() > 0) {
-				prevData = this._prevDataList.get(0);
-			}
+			byte[] prevData = new byte[(width >> 3) * height];
+			this._prevData.getPrevData(prevData);
 			c.drawColor(colorInfo.backColor);
 			int mask = 0x80;
 			byte[] dataArray = this._data;
@@ -275,6 +260,7 @@ public class LifegameCalc implements Runnable{
 			deadPath.close();
 			
 			if(this._backPattern.isBitmap() == false) {
+				recycleBitmapList();
 				for(int i = 0; i < this._backPattern.getPathList().size(); i++) {
 					paint.setColor(this._backPattern.makeColor(colorInfo.getBackColor()).get(i));
 					c.drawPath(this._backPattern.getPathList().get(i), paint);
@@ -307,7 +293,6 @@ public class LifegameCalc implements Runnable{
 		}
 	}
 	private void drawBattery(Canvas c, int color, int backColor) {
-//		float lineWidth =  this._pxSize*4/10.0f;
 		float lineWidth =  this._pxSize*4/15.0f;
 		float spaceWidth = 2;
 		float height = (this._pxSize * 4 -  lineWidth * 2 - spaceWidth) - (5 + lineWidth * 2 + spaceWidth);
@@ -348,8 +333,8 @@ public class LifegameCalc implements Runnable{
 		}
 	}
 	
-	private byte[] nextLifeArray(byte[] srcArray,int width,int height) {
-		byte[] arr = new byte[srcArray.length];
+	private void nextLifeArray(byte[] src,byte[] dist, int width,int height) {
+		byte[] srcArray = cloneData(src);
 		int mask = 0;
 		int val = 0;
 		for(int i = 0; i < height; i++) {
@@ -359,22 +344,24 @@ public class LifegameCalc implements Runnable{
 				mask = 0x80;
 				val = 0x80;
 				mask = mask >> (j % 8);
-				int index = (width >> 3 )* i + (j >> 3); 
+				int index = (width >> 3 )* i + (j >> 3);
+				if(j % 8 == 0) {
+					dist[index] = 0;
+				}
 				if((srcArray[index] & mask) > 0) {
 					if(c == 2 || c == 3) {
 						val = val >> (j % 8);
-						arr[index] = (byte)(arr[index] | val);
+						dist[index] = (byte)(dist[index] | val);
 					}
 				}
 				else {
 					if(c == 3) {
 						val = val >> (j % 8);
-						arr[index] = (byte)(arr[index] | val);
+						dist[index] = (byte)(dist[index] | val);
 					}
 				}
 			}
 		}
-		return arr;
 	}
 	private byte getEightBits(byte[] byteArray, int bitPos,int bitWidth,int bitHeight){
 		int ret = 0;
@@ -480,41 +467,41 @@ public class LifegameCalc implements Runnable{
 		iBits = (iBits & 0xff) + ((iBits >> 8) & 0xff);
 		return (byte)iBits;
 	}
-	public void setPattern(Pattern p, int x,  int y ) {
-		synchronized (syncObj) {
-			int bitWidth = this._width;
-			int bitHeight = this._height;
-			byte[] pattern = p.getBytedata();
-			int patWidth = p.getByteWidth();
-			int patHeight = p.getByteHeight();
-			byte[] data = cloneData(this._data);
-			if(data == null) {
-				return;
-			}
-			int px = x;
-			int py = y;
-			if(bitWidth - x < patWidth * 8) {
-				px = bitWidth - patWidth * 8;
-			} 
-			if(bitHeight - y < patHeight) {
-				py = bitHeight - patHeight;
-			}
-			int index = (bitWidth >> 3)* py + (px >> 3);
-			for(int j = 0; j < patHeight; j++) {
-				for(int k = 0; k < patWidth; k++) {
-					data[index] = pattern[patWidth * j + k];
-					index++;
-				}
-				index = index + ((bitWidth >> 3) - patWidth);
-			}
-			this.setData(data);
-		}
-		draw();
-	}
-	private byte[] copyPattern(byte[] srcdata, int x, int y , int bitWidth, int bitHeight, Pattern p) {
-		byte[] data = cloneData(srcdata);
+//	public void setPattern(Pattern p, int x,  int y ) {
+//		synchronized (syncObj) {
+//			int bitWidth = this._width;
+//			int bitHeight = this._height;
+//			byte[] pattern = p.getBytedata();
+//			int patWidth = p.getByteWidth();
+//			int patHeight = p.getByteHeight();
+//			byte[] data = cloneData(this._data);
+//			if(data == null) {
+//				return;
+//			}
+//			int px = x;
+//			int py = y;
+//			if(bitWidth - x < patWidth * 8) {
+//				px = bitWidth - patWidth * 8;
+//			} 
+//			if(bitHeight - y < patHeight) {
+//				py = bitHeight - patHeight;
+//			}
+//			int index = (bitWidth >> 3)* py + (px >> 3);
+//			for(int j = 0; j < patHeight; j++) {
+//				for(int k = 0; k < patWidth; k++) {
+//					data[index] = pattern[patWidth * j + k];
+//					index++;
+//				}
+//				index = index + ((bitWidth >> 3) - patWidth);
+//			}
+//			this.setData(data);
+//		}
+//		draw();
+//	}
+	private void copyPattern(byte[] srcdata, int x, int y , int bitWidth, int bitHeight, Pattern p) {
+		byte[] data = srcdata;
 		if(data == null) {
-			return null;
+			return;
 		}
 		byte[] pattern = p.getBytedata();
 		int index = 0;
@@ -550,7 +537,6 @@ public class LifegameCalc implements Runnable{
 					index = index + ((bitWidth >> 3) - patWidth);
 				}
 			}
-			return data;
 		}
 		catch(Exception e) {
 			if(e != null && e.getMessage() != null) 
@@ -566,7 +552,6 @@ public class LifegameCalc implements Runnable{
 			Log.w("Lifegame", "index:" + index);
 			Log.w("Lifegame", "j:" + j);
 			Log.w("Lifegame", "j:" + k);
-			return null;
 		}
 	}
 	public void addRandomPatterns(int num) {
@@ -574,20 +559,17 @@ public class LifegameCalc implements Runnable{
 			Random r = new Random();
 			int width = this._width;
 			int height = this._height;
-			byte[] data = cloneData(this._data);
+			byte[] data = this._data;
 			if(data == null) {
 				return;
 			}
+			pushPrevData(data);
 			Patterns patterns = new Patterns(context);
 			for(int i= 0; i < num; i++) {
 				Pattern p = patterns.getRandomPattern();
 				int x = r.nextInt(width);
 				int y = r.nextInt(height);
-				data = this.copyPattern(data, x, y , width, height,p);
-			}
-			if(data != null) 
-			{
-				this.setData(data);
+				this.copyPattern(data, x, y , width, height,p);
 			}
 		}
 		draw();
@@ -632,10 +614,8 @@ public class LifegameCalc implements Runnable{
 		synchronized (syncObj) {
 			Patterns patterns = new Patterns(context);
 			Pattern p = patterns.getRandomPattern();
-			byte[] data = copyPattern(this._data, ((int)x)/this._pxSize, ((int)y)/this._pxSize, this._width, this._height, p);
-			if(data != null) {
-				setData(data);
-			}
+			pushPrevData(this._data);
+			copyPattern(this._data, ((int)x)/this._pxSize, ((int)y)/this._pxSize, this._width, this._height, p);
 		}
 		draw();
 	}
@@ -672,6 +652,7 @@ public class LifegameCalc implements Runnable{
 	}
 	synchronized public void setBackPattern(int pattern) {
 		if(pattern != this._backPattern.getPatternId()) {
+			this._backPattern = null;
 			this._backPattern = new BackPattern(pattern, this._width, this._height);
 		}
 	}
@@ -1000,6 +981,40 @@ public class LifegameCalc implements Runnable{
 		}
 		public boolean isBitmap() {
 			return bitmap;
+		}
+	}
+	class PreviousData
+	{
+		ByteBuffer bf;
+		int dataLen;
+		public PreviousData(int num, int width, int height) {
+			this.bf = ByteBuffer.allocate((width >> 3) * height);
+			this.dataLen = (width >> 3)*height; 
+		}
+		public void push(byte[] data) {
+			if(data == null) {
+				return;
+			}
+			if(bf.capacity() - bf.position() < data.length)
+			{
+				bf.position(0);
+			}
+			int position = bf.position();
+			bf.put(data);
+			bf.position(position + dataLen);
+		}
+		public void getPrevData(byte[] dist) {
+			if(dist == null) {
+				return;
+			}
+			int nowPosition = bf.position();
+			int position = nowPosition - dataLen;
+			if(position < 0) {
+				position = bf.capacity() - dataLen;
+			}
+			bf.position(position);
+			bf.get(dist);
+			bf.position(nowPosition);
 		}
 	}
 
